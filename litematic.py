@@ -20,7 +20,7 @@ class _Reader:
         self.pos = 0
 
     def read(self, n: int) -> bytes:
-        if self.pos + n > len(self.data):
+        if n < 0 or self.pos + n > len(self.data):
             raise NBTError("Unerwartetes Ende der NBT-Datei")
         out = self.data[self.pos:self.pos + n]
         self.pos += n
@@ -40,7 +40,9 @@ class _Reader:
         return self.read(n).decode("utf-8", errors="replace")
 
 
-def _payload(r: _Reader, tag: int):
+def _payload(r: _Reader, tag: int, depth: int = 0):
+    if depth > 64:
+        raise NBTError("NBT ist zu tief verschachtelt")
     if tag == 1: return r.i8()
     if tag == 2: return r.i16()
     if tag == 3: return r.i32()
@@ -54,8 +56,9 @@ def _payload(r: _Reader, tag: int):
     if tag == 9:
         item_type = r.u8()
         n = r.i32()
-        if n < 0: raise NBTError("Negative Listenlänge")
-        return [_payload(r, item_type) for _ in range(n)]
+        if n < 0 or n > len(r.data) - r.pos or (n and item_type == 0):
+            raise NBTError("Ungültige Listenlänge")
+        return [_payload(r, item_type, depth + 1) for _ in range(n)]
     if tag == 10:
         out = {}
         while True:
@@ -63,12 +66,16 @@ def _payload(r: _Reader, tag: int):
             if item_type == 0:
                 return out
             name = r.string()
-            out[name] = _payload(r, item_type)
+            out[name] = _payload(r, item_type, depth + 1)
     if tag == 11:
         n = r.i32()
+        if n < 0 or n > (len(r.data) - r.pos) // 4:
+            raise NBTError("Ungültige Int-Array-Länge")
         return [r.i32() for _ in range(n)]
     if tag == 12:
         n = r.i32()
+        if n < 0 or n > (len(r.data) - r.pos) // 8:
+            raise NBTError("Ungültige Long-Array-Länge")
         return [r.i64() for _ in range(n)]
     raise NBTError(f"Unbekannter NBT-Tag: {tag}")
 
@@ -76,7 +83,10 @@ def _payload(r: _Reader, tag: int):
 def read_nbt(path: Path) -> dict:
     data = path.read_bytes()
     if data[:2] == b"\x1f\x8b":
-        data = gzip.decompress(data)
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as f:
+            data = f.read(256 * 1024 * 1024 + 1)
+    if len(data) > 256 * 1024 * 1024:
+        raise NBTError("Entpackte NBT-Datei ist größer als 256 MB")
     r = _Reader(data)
     root_type = r.u8()
     if root_type != 10:
@@ -176,6 +186,7 @@ def convert_litematic(path: Path, projects_dir: Path, preferred_slug: str | None
     # Later regions overwrite earlier blocks when regions overlap.
     blocks: dict[tuple[int, int, int], tuple[str, tuple[tuple[str, str], ...]]] = {}
 
+    total_volume = 0
     for region_name, region in regions.items():
         size = region.get("Size") or {}
         pos = region.get("Position") or {}
@@ -184,6 +195,9 @@ def convert_litematic(path: Path, projects_dir: Path, preferred_slug: str | None
         if not nx or not ny or not nz:
             continue
         volume = nx * ny * nz
+        total_volume += volume
+        if total_volume > 16_000_000:
+            raise NBTError("Bauwerk überschreitet das Importlimit von 16 Millionen Positionen")
         palette_raw = region.get("BlockStatePalette") or []
         longs = region.get("BlockStates") or []
         if not palette_raw:
@@ -191,19 +205,24 @@ def convert_litematic(path: Path, projects_dir: Path, preferred_slug: str | None
         palette_keys = [_canonical_state(s) for s in palette_raw]
         values = _decode_states(longs, len(palette_keys), volume)
         px, py, pz = int(pos.get("x", 0)), int(pos.get("y", 0)), int(pos.get("z", 0))
-        dx, dy, dz = (1 if sx > 0 else -1), (1 if sy > 0 else -1), (1 if sz > 0 else -1)
+        # Packed arrays always run from the minimum corner toward positive axes.
+        # Negative Size moves that minimum; it does not reverse array order.
+        px += min(0, sx + 1)
+        py += min(0, sy + 1)
+        pz += min(0, sz + 1)
 
         # Litematica stores X fastest, then Z, then Y.
         for ly in range(ny):
-            wy = py + ly * dy
+            wy = py + ly
             for lz in range(nz):
-                wz = pz + lz * dz
+                wz = pz + lz
                 base = (ly * nz + lz) * nx
                 for lx in range(nx):
                     state_key = palette_keys[values[base + lx]]
-                    if state_key[0] == "minecraft:air":
+                    wx = px + lx
+                    if state_key[0] in {"minecraft:air", "minecraft:cave_air", "minecraft:void_air"}:
+                        blocks.pop((wx, wy, wz), None)
                         continue
-                    wx = px + lx * dx
                     blocks[(wx, wy, wz)] = state_key
 
     if not blocks:
@@ -218,6 +237,8 @@ def convert_litematic(path: Path, projects_dir: Path, preferred_slug: str | None
 
     # Stable palette, sorted by base name and properties; index 0 is not special here.
     unique_keys = sorted(set(blocks.values()), key=lambda k: (k[0], k[1]))
+    if len(unique_keys) > 65536:
+        raise NBTError("Mehr als 65536 verschiedene Blockstates werden nicht unterstützt")
     key_to_index = {k: i for i, k in enumerate(unique_keys)}
     palette = []
     for key in unique_keys:
@@ -252,7 +273,11 @@ def convert_litematic(path: Path, projects_dir: Path, preferred_slug: str | None
     layers: dict[int, list[tuple[int,int,int]]] = defaultdict(list)
     for (x, y, z), idx in normalized.items():
         layers[y].append((x, z, idx))
-        if any((x+dx, y+dy, z+dz) not in normalized for dx,dy,dz in dirs):
+        if not is_full_cube(palette[idx]) or any(
+            (x+dx, y+dy, z+dz) not in normalized or
+            not is_full_cube(palette[normalized[(x+dx, y+dy, z+dz)]])
+            for dx,dy,dz in dirs
+        ):
             surface.append((x, y, z, idx))
 
     with (project_dir / "surface.bin").open("wb") as f:
@@ -298,3 +323,16 @@ def convert_litematic(path: Path, projects_dir: Path, preferred_slug: str | None
     }
     (project_dir / "metadata.json").write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
+
+
+def is_full_cube(state: dict) -> bool:
+    """Conservative occluder list: keep geometry next to partial/transparent blocks."""
+    name = state["name"].split(":")[-1]
+    if name.endswith("_slab") and state.get("properties", {}).get("type") == "double":
+        return True
+    return not any(part in name for part in (
+        "stairs", "slab", "fence", "wall", "pane", "glass", "door", "cactus",
+        "hopper", "lantern", "carpet", "torch", "chain", "leaves", "water",
+        "lava", "grass", "flower", "rail", "bed", "chest", "sign", "button",
+        "pressure_plate", "sapling", "vine", "bush", "ladder", "bars",
+    ))

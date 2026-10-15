@@ -4,14 +4,14 @@ cd /d "%~dp0"
 title Lauchmann Bauplan
 where py >nul 2>nul
 if %errorlevel%==0 (
-  py -3 updater.py
   py -3 server.py
+  if errorlevel 1 pause
   goto :eof
 )
 where python >nul 2>nul
 if %errorlevel%==0 (
-  python updater.py
   python server.py
+  if errorlevel 1 pause
   goto :eof
 )
 echo.

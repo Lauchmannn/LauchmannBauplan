@@ -10,12 +10,18 @@ import re
 import threading
 import time
 import webbrowser
+import hashlib
+import tempfile
+import shutil
 
 from litematic import convert_litematic
+from textures import TextureLibrary
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8770
 MAX_UPLOAD = 100 * 1024 * 1024
+TEXTURES = TextureLibrary()
+IMPORT_LOCK = threading.Lock()
 
 mimetypes.add_type("application/octet-stream", ".bin")
 
@@ -58,13 +64,38 @@ class Handler(SimpleHTTPRequestHandler):
             return super().do_GET()
         if parsed.path == "/api/projects":
             return self._json(project_summaries())
-        return super().do_GET()
+        if parsed.path == "/api/textures":
+            return self._json({"names": sorted(TEXTURES.entries), "available": bool(TEXTURES.entries)})
+        if parsed.path == "/api/texture":
+            data = TEXTURES.read(parse_qs(parsed.query).get("name", [""])[0])
+            if data is None:
+                return self._json({"error": "Keine lokale Textur"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        # Only serve app assets and generated viewer data, never source schematics,
+        # Git metadata, arbitrary local files or directory listings.
+        path = Path(self.translate_path(parsed.path)).resolve()
+        allowed = any(path.is_relative_to(ROOT / folder) for folder in ("app", "projects"))
+        if allowed and path.is_file() and path.suffix in {".html", ".js", ".css", ".json", ".bin"}:
+            return super().do_GET()
+        return self._json({"error": "Nicht gefunden"}, 404)
+
+    def do_HEAD(self):
+        # Do not inherit unrestricted static file handling for this method.
+        self.send_error(405)
 
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path != "/api/import-litematic":
             return self._json({"error": "Unbekannter Endpunkt"}, 404)
         try:
+            origin = self.headers.get("Origin")
+            if origin and origin != f"http://127.0.0.1:{PORT}":
+                return self._json({"error": "Fremder Ursprung nicht erlaubt"}, 403)
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0:
                 return self._json({"error": "Keine Datei empfangen"}, 400)
@@ -76,11 +107,26 @@ class Handler(SimpleHTTPRequestHandler):
             if not safe_name.lower().endswith(".litematic"):
                 safe_name += ".litematic"
             data = self.rfile.read(length)
+            if len(data) != length:
+                return self._json({"error": "Unvollständige Datei"}, 400)
             schematics = ROOT / "schematics"
             schematics.mkdir(exist_ok=True)
-            target = schematics / safe_name
-            target.write_bytes(data)
-            meta = convert_litematic(target, ROOT / "projects")
+            digest = hashlib.sha256(data).hexdigest()[:16]
+            stem = re.sub(r"[^a-z0-9]+", "-", Path(safe_name).stem.lower()).strip("-")[:64] or "litematic"
+            slug = f"{stem}-{digest}"
+            # Validate and convert in an isolated staging directory before changing
+            # persistent data. Different files with the same title cannot collide.
+            with IMPORT_LOCK, tempfile.TemporaryDirectory(prefix="lauchmann-import-") as td:
+                staged = Path(td) / safe_name
+                staged.write_bytes(data)
+                meta = convert_litematic(staged, Path(td) / "projects", preferred_slug=slug)
+                target = ROOT / "projects" / slug
+                target.parent.mkdir(exist_ok=True)
+                if not target.exists():
+                    shutil.move(str(Path(td) / "projects" / slug), str(target))
+                source = schematics / f"{slug}.litematic"
+                if not source.exists():
+                    source.write_bytes(data)
             return self._json({"ok": True, "project": {"slug": meta["slug"], "name": meta["name"], "blockCount": meta["blockCount"]}})
         except Exception as exc:
             return self._json({"error": str(exc)}, 400)
@@ -105,12 +151,15 @@ if __name__ == "__main__":
     (ROOT / "projects").mkdir(exist_ok=True)
     (ROOT / "schematics").mkdir(exist_ok=True)
     (ROOT / "user-data").mkdir(exist_ok=True)
-    threading.Thread(target=open_browser, daemon=True).start()
-    print("Lauchmann Bauplan läuft.")
-    print(f"Öffne im Browser: http://127.0.0.1:{PORT}/")
-    print("Litematic-Dateien kannst du direkt im Viewer importieren.")
-    print("Zum Beenden dieses Fenster schließen oder Strg+C drücken.")
     try:
-        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        with ThreadingHTTPServer(("127.0.0.1", PORT), Handler) as http:
+            threading.Thread(target=open_browser, daemon=True).start()
+            print("Lauchmann Bauplan läuft.")
+            print(f"Öffne im Browser: http://127.0.0.1:{PORT}/")
+            print("Litematic-Dateien kannst du direkt im Viewer importieren.")
+            print("Zum Beenden dieses Fenster schließen oder Strg+C drücken.")
+            http.serve_forever()
     except KeyboardInterrupt:
         pass
+    except OSError as exc:
+        raise SystemExit(f"Server konnte nicht starten (Port {PORT} muss frei sein): {exc}")
