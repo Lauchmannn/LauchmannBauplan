@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+projects/
+schematics/
+user-data/
+worlds/
+local/

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lauchmann Bauplan</title>
+  <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">LAUCHMANN <span>BAUPLAN</span></div>
+    <select id="projectSelect" class="projectSelect" title="Bauwerk auswählen"></select>
+    <div class="projectTitle" id="projectTitle">Litematic Viewer</div>
+    <input id="importInput" type="file" accept=".litematic" hidden>
+    <button class="primary" id="importBtn">Litematic importieren</button>
+    <button class="ghost" id="fitBtn">Ansicht zentrieren</button>
+  </header>
+
+  <div class="toolbar">
+    <div class="segmented" id="modeButtons">
+      <button data-mode="full" class="active">Gesamt</button>
+      <button data-mode="cut">Schnitt bis Y</button>
+      <button data-mode="layer">Nur Ebene</button>
+    </div>
+    <button id="view3d" class="tool active">3D</button>
+    <button id="viewTop" class="tool">Draufsicht</button>
+    <div class="ycontrol">
+      <button id="yMinus">−</button>
+      <span>Y <strong id="yValue">0</strong></span>
+      <input id="ySlider" type="range" min="0" max="0" value="0" step="1">
+      <button id="yPlus">+</button>
+    </div>
+    <button id="doneLayer" class="tool doneLayer">Ebene fertig</button>
+    <div class="count" id="visibleCount">Lade …</div>
+  </div>
+
+  <main>
+    <section class="viewportWrap">
+      <canvas id="glcanvas"></canvas>
+      <div class="badge" id="mapBadge">LITEMATIC</div>
+      <div class="coords" id="coords">X – · Y – · Z –</div>
+      <div class="help">Links ziehen: drehen · Rechts ziehen: verschieben · Mausrad: zoomen · Klick: Block prüfen</div>
+      <div class="loading" id="loading"><div class="spinner"></div><span id="loadingText">Bauwerk wird geladen …</span></div>
+      <div class="toast" id="toast"></div>
+    </section>
+
+    <aside id="sidebar">
+      <div class="tabs">
+        <button class="tab active" data-tab="block">BLOCK</button>
+        <button class="tab" data-tab="materials">MATERIALIEN</button>
+        <button class="tab" data-tab="project">PROJEKT</button>
+      </div>
+
+      <div class="panel active" id="panel-block">
+        <h3>Ausgewählter Block</h3>
+        <div class="empty" id="blockEmpty">Klicke im Modell auf einen Block.</div>
+        <div id="blockInfo" hidden>
+          <div class="blockSwatch" id="blockSwatch"></div>
+          <div class="blockName" id="blockName">–</div>
+          <dl>
+            <dt>Koordinate</dt><dd id="blockCoord">–</dd>
+            <dt>Block-ID</dt><dd id="blockId">–</dd>
+            <dt>Blockstate</dt><dd id="blockVariant">–</dd>
+          </dl>
+        </div>
+        <div class="tipbox">
+          Fürs Nachbauen ist <b>Nur Ebene</b> am übersichtlichsten. Blockstates wie Ausrichtung, Hälfte oder Wasserstand werden rechts angezeigt.
+        </div>
+      </div>
+
+      <div class="panel" id="panel-materials">
+        <div class="matHead">
+          <h3>Materialliste</h3>
+          <select id="materialScope">
+            <option value="layer">Aktuelle Ebene</option>
+            <option value="all">Gesamtes Bauwerk</option>
+          </select>
+        </div>
+        <div class="materialSummary" id="materialSummary">–</div>
+        <div class="materials" id="materials"></div>
+      </div>
+
+      <div class="panel" id="panel-project">
+        <h3 id="projectPanelTitle">Litematic</h3>
+        <dl class="projectData">
+          <dt>Quelle</dt><dd id="projSource">–</dd>
+          <dt>Ersteller</dt><dd id="projAuthor">–</dd>
+          <dt>Größe</dt><dd id="projSize">–</dd>
+          <dt>Blöcke</dt><dd id="projBlocks">–</dd>
+          <dt>Oberfläche</dt><dd id="projSurface">–</dd>
+          <dt>MC DataVersion</dt><dd id="projDataVersion">–</dd>
+        </dl>
+        <div class="progressBox">
+          <div><span>Baufortschritt</span><strong id="progressText">0 %</strong></div>
+          <div class="progressTrack"><div id="progressBar"></div></div>
+          <small>Der Fortschritt wird nur lokal in deinem Browser gespeichert.</small>
+        </div>
+        <div class="tipbox">
+          Du kannst weitere <b>.litematic</b>-Dateien oben direkt importieren. Sie bleiben lokal auf deinem PC.
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/app/viewer.js"></script>
+</body>
+</html>
