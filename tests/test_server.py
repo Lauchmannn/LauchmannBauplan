@@ -9,10 +9,11 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from http.server import ThreadingHTTPServer
 import zipfile
+import struct
 
 import server
 from textures import TextureLibrary
-from fixtures import schematic
+from fixtures import schematic, region
 
 
 class ServerTests(unittest.TestCase):
@@ -68,6 +69,39 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(self.request('/api/texture?name=stone')[1],b'example-png')
             with self.assertRaises(HTTPError):self.request('/api/texture?name=../../.git/config')
         self.assertEqual(jar.read_bytes(),original)
+
+    def test_legacy_upside_down_project_is_refreshed_from_original(self):
+        from litematic import convert_litematic, CONVERTER_VERSION
+        source=self.root/'schematics'/'legacy.litematic'
+        source.parent.mkdir()
+        source.write_bytes(schematic(region(size=(1,-2,1),position=(0,10,0),palette=[('minecraft:stone',{}),('minecraft:gold_block',{})],states=[0,1])))
+        original=source.read_bytes()
+        meta=convert_litematic(source,self.root/'projects',preferred_slug='legacy')
+        project=self.root/'projects'/'legacy'
+        meta.pop('converterVersion')
+        (project/'metadata.json').write_text(json.dumps(meta))
+        # Simulate the old converter: gold at the bottom, stone at the top.
+        (project/'surface.bin').write_bytes(struct.pack('<8H',0,0,0,0,0,1,0,1))
+        (project/'local-note.txt').write_text('Preserve local files')
+        response=json.loads(self.request('/projects/legacy/metadata.json')[1])
+        self.assertEqual(response['converterVersion'],CONVERTER_VERSION)
+        self.assertEqual(response['slug'],'legacy')
+        self.assertEqual(response['originalBounds']['minY'],9)
+        # Stone belongs at Y=9; gold belongs at Y=10, matching Litematica.
+        self.assertEqual(self.request('/projects/legacy/surface.bin')[1],struct.pack('<8H',0,0,0,1,0,1,0,0))
+        self.assertEqual(self.request('/projects/legacy/layers/y0000.bin')[1],struct.pack('<3H',0,0,1))
+        self.assertEqual(self.request('/projects/legacy/layers/y0001.bin')[1],struct.pack('<3H',0,0,0))
+        self.assertEqual(source.read_bytes(),original)
+        self.assertEqual((project/'local-note.txt').read_text(),'Preserve local files')
+        self.assertEqual(json.loads(self.request('/projects/legacy/metadata.json')[1]),response)
+
+    def test_legacy_without_original_requests_reimport_instead_of_guessing(self):
+        project=self.root/'projects'/'legacy';project.mkdir(parents=True)
+        (project/'metadata.json').write_text(json.dumps({'slug':'legacy','sourceFile':'missing.litematic'}))
+        (project/'surface.bin').write_bytes(b'unchanged')
+        response=json.loads(self.request('/projects/legacy/metadata.json')[1])
+        self.assertTrue(response['needsReimport'])
+        self.assertEqual((project/'surface.bin').read_bytes(),b'unchanged')
 
 
 if __name__=='__main__':unittest.main()

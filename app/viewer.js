@@ -143,6 +143,8 @@ async function loadProject(slug){
    if(atlas)gl.deleteTexture(atlas.texture);
    for(const m of meshes)gl.deleteBuffer(m.buffer);meshes=[];
    meta=nextMeta;surfaceRecords=nextSurface;atlas=nextAtlas;layerCache=new Map();
+   $('#importNotice').hidden=!meta.needsReimport;
+   $('#importNotice').textContent=meta.needsReimport?'Dieses Bauwerk wurde mit einer alten Version eingelesen. Bitte die Original-Litematic erneut importieren, damit oben und unten korrigiert werden.':'';
    $('#textureStatus').textContent=textureStatus;
    $('#blockInfo').hidden=true;$('#blockEmpty').hidden=false;
    currentY=meta.initialY||0;ySlider.min=0;ySlider.max=Math.max(0,meta.size.y-1);ySlider.value=currentY;yValue.textContent=currentY+meta.originalBounds.minY;

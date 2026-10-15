@@ -9,6 +9,8 @@ import math
 import re
 import struct
 
+CONVERTER_VERSION = 2
+
 
 class NBTError(ValueError):
     pass
@@ -300,6 +302,7 @@ def convert_litematic(path: Path, projects_dir: Path, preferred_slug: str | None
 
     out = {
         "format": 2,
+        "converterVersion": CONVERTER_VERSION,
         "slug": slug,
         "name": project_name,
         "author": str(metadata.get("Author") or "Unbekannt"),

@@ -18,6 +18,7 @@ Das Konsolenfenster offen lassen; zum Beenden Strg+C drücken. Port 8770 muss fr
 - „3D“ / „Draufsicht“ wechseln die Kamera.
 - „Gesamt“, „Nur Ebene“ und „Schnitt bis Y“ wählen den sichtbaren Teil. Schnitt enthält die ausgewählte Ebene.
 - Y-Regler und −/+ wechseln Ebenen von unten nach oben. Angezeigt wird die ursprüngliche, schemarelative Y-Koordinate. Negative Regionsgrößen werden von der minimalen Ecke aus gelesen, ohne Spiegelung oder umgedrehte Y-Achse.
+- Ältere Importe mit möglicherweise vertauschtem Oben/Unten werden beim Öffnen automatisch aus der gespeicherten Originaldatei neu berechnet. Originaldatei, Projektkennung und gespeicherter Fortschritt bleiben erhalten. Fehlt die Originaldatei, fordert ein Hinweis zum erneuten Import auf.
 - Block anklicken: Block-ID, exakte Properties und ursprüngliche schemarelative X/Y/Z-Koordinaten (einschließlich Regionsversatz).
 - „Materialien“ zeigt die aktuelle Ebene oder das gesamte Bauwerk. Mengen zählen platzierte Blöcke; „Stacks“ sind rechnerische 64er-Gruppen, keine detaillierte Crafting-/Drop-Liste.
 - „Ebene fertig“ speichert den Fortschritt pro importiertem Projekt im Browser. Er bleibt beim Neuladen erhalten. Anderes Browserprofil, gelöschter Browserspeicher oder Wechsel von `127.0.0.1` zu `localhost` verwenden einen anderen Speicher. Geänderte Quelldateien erhalten bewusst ein neues Projekt.

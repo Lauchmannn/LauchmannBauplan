@@ -18,3 +18,4 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow:hidden;
 body.dropActive::after { content: 'Litematic hier ablegen'; position: fixed; inset: 12px; border: 4px dashed #8fce53; background: #15271eee; color: white; display: grid; place-items: center; font-size: 2rem; z-index: 100; pointer-events: none; }
 #textureStatus { color: #90b57e; font-size: 12px; line-height: 1.5; }
 button:disabled { opacity: .5; cursor: wait; }
+#importNotice:not([hidden]) { padding: 10px 16px; background: #63470c; color: #fff2c7; line-height: 1.5; }

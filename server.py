@@ -14,7 +14,7 @@ import hashlib
 import tempfile
 import shutil
 
-from litematic import convert_litematic
+from litematic import convert_litematic, CONVERTER_VERSION
 from textures import TextureLibrary
 
 ROOT = Path(__file__).resolve().parent
@@ -24,6 +24,41 @@ TEXTURES = TextureLibrary()
 IMPORT_LOCK = threading.Lock()
 
 mimetypes.add_type("application/octet-stream", ".bin")
+
+
+def current_project(project_dir):
+    """Refresh legacy generated geometry, keeping the source, slug and browser progress."""
+    meta_path = project_dir / "metadata.json"
+    with IMPORT_LOCK:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta.get("converterVersion") == CONVERTER_VERSION:
+            return meta
+        sources = [ROOT / "schematics" / f"{project_dir.name}.litematic"]
+        source_name = meta.get("sourceFile")
+        if isinstance(source_name, str) and Path(source_name).name == source_name:
+            sources.append(ROOT / "schematics" / source_name)
+        source = next((p for p in sources if p.resolve().is_relative_to((ROOT / "schematics").resolve()) and p.is_file()), None)
+        if source is None:
+            return {**meta, "needsReimport": True}
+        try:
+            with tempfile.TemporaryDirectory(prefix="lauchmann-refresh-") as td:
+                updated = convert_litematic(source, Path(td), preferred_slug=project_dir.name)
+                updated["sourceFile"] = meta.get("sourceFile", source.name)
+                generated = Path(td) / project_dir.name
+                # Replace generated data only; preserve any other local files.
+                # Metadata is written last so it never advertises partial geometry.
+                for path in generated.rglob("*.bin"):
+                    target = project_dir / path.relative_to(generated)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    temporary = target.with_suffix(".bin.refresh")
+                    shutil.copyfile(path, temporary)
+                    os.replace(temporary, target)
+                temporary_meta = meta_path.with_suffix(".json.refresh")
+                temporary_meta.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.replace(temporary_meta, meta_path)
+                return updated
+        except (OSError, ValueError, KeyError, TypeError):
+            return {**meta, "needsReimport": True}
 
 
 def project_summaries():
@@ -81,6 +116,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = Path(self.translate_path(parsed.path)).resolve()
         allowed = any(path.is_relative_to(ROOT / folder) for folder in ("app", "projects"))
         if allowed and path.is_file() and path.suffix in {".html", ".js", ".css", ".json", ".bin"}:
+            if path.name == "metadata.json" and path.parent.parent == ROOT / "projects":
+                return self._json(current_project(path.parent))
             return super().do_GET()
         return self._json({"error": "Nicht gefunden"}, 404)
 
